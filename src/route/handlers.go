@@ -18,6 +18,7 @@ import (
 	"github.com/kafkaesque-io/pulsar-beam/src/model"
 	"github.com/kafkaesque-io/pulsar-beam/src/pulsardriver"
 	"github.com/kafkaesque-io/pulsar-beam/src/util"
+	"github.com/kafkaesque-io/pulsar-beam/src/pulsarutil"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -196,6 +197,9 @@ func SSEHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse the startFrom query parameter
+	startFrom := r.URL.Query().Get("startFrom")
+
 	// Make sure that the writer supports flushing.
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -217,6 +221,22 @@ func SSEHandler(w http.ResponseWriter, r *http.Request) {
 	defer consumer.Close()
 	if strings.HasPrefix(subName, model.NonResumable) {
 		defer consumer.Unsubscribe()
+	}
+
+	// Apply seek after subscribing based on the startFrom query parameter
+	if startFrom != "" {
+		pos, msgID, ts, err := pulsarutil.GetStartOption(startFrom)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if msgID != nil {
+			consumer.Seek(*msgID)
+		} else if ts != nil {
+			consumer.SeekByTime(*ts)
+		} else {
+			consumer.SeekByTime(time.Now())
+		}
 	}
 
 	consumChan := consumer.Chan()
